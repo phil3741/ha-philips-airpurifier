@@ -17,6 +17,10 @@ from .const import DOMAIN
 from .device_models import DEVICE_MODELS
 from .model import ApiGeneration, DeviceInformation, DeviceModelConfig
 
+# Bound every one-shot device read. Without this an unresponsive purifier
+# blocks HA's bootstrap indefinitely instead of raising ConfigEntryNotReady.
+STATUS_TIMEOUT = 30
+
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
@@ -118,7 +122,9 @@ class PhilipsAirPurifierCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             # One-shot read: ongoing updates come from the observe stream, so
             # avoid registering a redundant observation (philips-airctrl >= 1.1.0).
-            status, timeout = await self.client.get_status(observe=False)
+            status, timeout = await asyncio.wait_for(
+                self.client.get_status(observe=False), timeout=STATUS_TIMEOUT
+            )
             self._timeout = timeout
             self._mark_available()
             return status
@@ -226,7 +232,9 @@ class PhilipsAirPurifierCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             self.client = await async_create_client(self.host, create_client=CoAPClient.create)
             # One-shot read before re-establishing the observe stream.
-            status, timeout = await self.client.get_status(observe=False)
+            status, timeout = await asyncio.wait_for(
+                self.client.get_status(observe=False), timeout=STATUS_TIMEOUT
+            )
             self._timeout = timeout
             self._last_update = asyncio.get_event_loop().time()
             self._reconnect_delay = RECONNECT_INITIAL_DELAY
@@ -252,7 +260,9 @@ class PhilipsAirPurifierCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             # One-shot initial read; continuous updates come from the observe
             # stream started below, so don't register a second observation here.
-            status, timeout = await self.client.get_status(observe=False)
+            status, timeout = await asyncio.wait_for(
+                self.client.get_status(observe=False), timeout=STATUS_TIMEOUT
+            )
             self._timeout = timeout
             self._mark_available()
             self.async_set_updated_data(status)
