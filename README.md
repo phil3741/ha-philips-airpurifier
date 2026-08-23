@@ -1,3 +1,19 @@
+> **Fork notice**
+>
+> Personal fork of
+> [`ruaan-deysel/ha-philips-airpurifier`](https://github.com/ruaan-deysel/ha-philips-airpurifier),
+> based on tag `v2026.6.3`. It carries two patches that upstream does not have
+> as of 2026-08-23 (`main` included):
+>
+> 1. **Support for the AC2220** (Philips 2200 Series, e.g. `AC2220/10`) - the
+>    model uses the same Gen3 configuration as its sibling AC2221.
+> 2. **A timeout on every `get_status()` call** in the coordinator. Without it an
+>    unresponsive device blocks Home Assistant's bootstrap indefinitely instead
+>    of raising `ConfigEntryNotReady`.
+>
+> Manifest version: `2026.6.3.1`. Upstream stays wired up as the `upstream`
+> remote; to pull in a new release, run `git rebase v<new-tag>`.
+
 # Philips Air Purifier Home Assistant Integration
 
 [![HACS Default][hacs_shield]][hacs]
