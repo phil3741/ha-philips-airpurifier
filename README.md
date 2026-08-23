@@ -1,3 +1,18 @@
+> **Fork notice**
+>
+> Personal fork of
+> [`ruaan-deysel/ha-philips-airpurifier`](https://github.com/ruaan-deysel/ha-philips-airpurifier),
+> tracking upstream `main`. It carries one patch that upstream does not have:
+> **support for the AC2220** (Philips 2200 Series, e.g. `AC2220/10`), which uses
+> the same Gen3 configuration as its sibling AC2221.
+>
+> A second patch, a timeout on the CoAP calls in the coordinator, was carried
+> here until upstream fixed the same problem in `e03cdd0` / PR #101. It has been
+> dropped in favour of the upstream fix.
+>
+> Manifest version: `2026.6.3.2`. Upstream stays wired up as the `upstream`
+> remote; to pull in new work, run `git rebase upstream/main`.
+
 # Philips Air Purifier Home Assistant Integration
 
 [![HACS Default][hacs_shield]][hacs]
