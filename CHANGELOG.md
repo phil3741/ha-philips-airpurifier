@@ -7,8 +7,75 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (`YYYY.MM
 
 ## [Unreleased]
 
+## [2026.10.0] - 2026-10-08
+
+### Added
+
+- Added support for **AC3854/25** (4000i, Thailand/Asia variant) with five preset modes (`auto`, `sleep`, `speed_1`, `speed_2`, `turbo`), four fan speeds, display backlight and brightness lights, gas preferred index select, and child lock switch ([#122](https://github.com/ruaan-deysel/ha-philips-airpurifier/issues/122)).
+
 ### Fixed
 
+- Eliminated Python 3.14 compile-time `SyntaxWarning: 'return' in a 'finally' block` originating from the aiocoap tinydtls transport by preloading the transport in the off-loop worker thread under a scoped warning filter ([#127](https://github.com/ruaan-deysel/ha-philips-airpurifier/issues/127)).
+- Replaced deprecated `DeviceEntry.config_entries` and direct `.devices.values()` access in diagnostics with `dr.async_entries_for_config_entry()` to remain fully compatible with Home Assistant 2026.10.0+ integration quality scale requirements.
+- Updated schema validation and type annotations to support Home Assistant 2026.10.0+ (`probatio` schema builder, `RepairsFlowResult`, and relocated entity platform constants).
+
+## [2026.9.2] - 2026-09-30
+
+### Fixed
+
+- Reduced Home Assistant event-loop blocking warnings during Philips CoAP
+  client creation by preparing aiocoap transport defaults in a worker thread
+  before opening the CoAP client.
+- Replaced deprecated `CONCENTRATION_MICROGRAMS_PER_CUBIC_METER` usage with
+  `UnitOfDensity.MICROGRAMS_PER_CUBIC_METER` to stay compatible with the
+  Home Assistant 2027.8 deprecation timeline.
+
+## [2026.9.1] - 2026-09-28
+
+### Fixed
+
+- The **HU1509/HU1510** and **HU4209/00** now use a status nudge (toggling the
+  display backlight) to fetch status, like the CX7550. Newer firmware on some
+  of these humidifiers never answers a plain status read and only pushes
+  updates on a real state change, which previously caused
+  detection to time out, setup to fail with `ConfigEntryNotReady`, or the
+  device to go permanently unavailable after the CoAP observe stream dropped
+  (reconnect kept retrying a read the firmware would never answer). The
+  nudge path also strips the `#N` suffix from the backlight key so it matches
+  the observed status payload and restores the user-selected backlight state
+  instead of forcing a stale value.
+- Nudge-based devices (CX7550, HU1509/HU1510, HU4209/00) no longer go
+  permanently silent when the CoAP observe stream hangs without erroring. The
+  update watchdog was unconditionally disabled for these models on the
+  assumption that a real disconnect always raises on the stream; in practice
+  the stream can go quiet forever without raising (socket alive, no data, no
+  exception), which nothing then detects. The watchdog now runs for these
+  devices too, with a much longer timeout (30 minutes) so a device that is
+  legitimately idle is not needlessly reconnected. The per-device "update
+  watchdog" option can still disable it entirely for a device known to sit
+  idle for very long stretches.
+- The watchdog missed-package threshold is now configurable per device with a
+  clear precedence order: per-device override, per-model default, then the
+  global fallback. This lets models like the **AC3039** stay online longer in
+  standby without forcing a broader change for every device, while still
+  keeping the default watchdog tolerance at 3 missed packages globally
+  ([#92](https://github.com/ruaan-deysel/ha-philips-airpurifier/issues/92)).
+
+## [2026.9.0] - 2026-09-04
+
+### Fixed
+
+- Fix JSON Syntax on icons
+
+## [2026.8.0] - 2026-08-30
+
+### Fixed
+
+- Reconnect recovery can no longer wedge indefinitely when a CoAP status read
+  stalls during reconnect. Coordinator CoAP calls are now time-bounded and
+  stale reconnect tasks are treated as wedged, so retries and availability
+  recovery continue as expected
+  ([#101](https://github.com/ruaan-deysel/ha-philips-airpurifier/pull/101)).
 - Rotation (oscillation) control is available again on the **AMF870**
   (Series 8000i 2-in-1). The model configuration listed only the target
   temperature under its numbers, which replaced rather than extended the AMF
@@ -32,6 +99,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (`YYYY.MM
 
 ### Added
 
+- Added a per-device option to enable or disable the update watchdog. This is
+  useful for models that rely on status nudges and can remain idle for long
+  periods without emitting push updates
+  ([#100](https://github.com/ruaan-deysel/ha-philips-airpurifier/pull/100)).
 - Support for the **CX7550/01** (Philips oscillating tower fan). It uses Gen3
   CoAP and is fan-only (no heater). Exposes all 12 manual fan speeds, the Auto,
   Sleep and Natural preset modes, on/off oscillation, the display backlight
@@ -132,6 +203,8 @@ Latest release prior to this changelog being introduced. See the
 [GitHub releases](https://github.com/ruaan-deysel/ha-philips-airpurifier/releases)
 for the history of earlier versions.
 
-[Unreleased]: https://github.com/ruaan-deysel/ha-philips-airpurifier/compare/v2026.6.1...HEAD
+[Unreleased]: https://github.com/ruaan-deysel/ha-philips-airpurifier/compare/v2026.10.0...HEAD
+[2026.10.0]: https://github.com/ruaan-deysel/ha-philips-airpurifier/compare/v2026.9.2...v2026.10.0
+[2026.9.2]: https://github.com/ruaan-deysel/ha-philips-airpurifier/compare/v2026.9.1...v2026.9.2
 [2026.6.1]: https://github.com/ruaan-deysel/ha-philips-airpurifier/compare/v2026.6.0...v2026.6.1
 [2026.6.0]: https://github.com/ruaan-deysel/ha-philips-airpurifier/releases/tag/v2026.6.0

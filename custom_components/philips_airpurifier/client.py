@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib
 import logging
-from typing import Any
+import os
+from typing import Any, cast
+import warnings
 
 from philips_airctrl import CoAPClient
 
@@ -16,6 +19,84 @@ _NUDGE_REGISTER_DELAY = 2.0
 # How long to wait for a push after each nudge, and how many times to nudge.
 _NUDGE_WAIT_TIMEOUT = 12.0
 _NUDGE_ATTEMPTS = 2
+_AIOCOAP_CLIENT_TRANSPORT_ENV = "AIOCOAP_CLIENT_TRANSPORT"
+_aiocoap_transport_env_ready = False
+_aiocoap_transport_env_lock = asyncio.Lock()
+
+
+def _preload_aiocoap_client_transports(transports: str | None) -> None:
+    """Preload aiocoap client transports in worker thread under a scoped warning filter.
+
+    Upstream aiocoap's DTLSClientConnection._start() in tinydtls.py contains a
+    'return' in a 'finally' block, which triggers a compile-time SyntaxWarning on
+    Python 3.14+. philips-airctrl uses only coap:// (plain UDP CoAP), not DTLS
+    (coaps://), but aiocoap pre-imports available client transports when
+    initializing the client context. Later, DTLSClientConnection._start() imports
+    DTLSSocket.
+
+    Preloading tinydtls here under a scoped filter suppresses the warning without
+    affecting transport availability or making DTLS usable. This workaround can
+    be removed once upstream aiocoap releases a fix for DTLSClientConnection._start().
+    Upstream reference: https://github.com/chrysn/aiocoap/issues
+    Integration reference: https://github.com/ruaan-deysel/ha-philips-airpurifier/issues/127
+    """
+    if not transports or "tinydtls" not in transports.split(":"):
+        return
+
+    with contextlib.suppress(Exception):
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                category=SyntaxWarning,
+                message=r".*'return' in a 'finally' block.*",
+                module=r".*aiocoap\.transports\.tinydtls.*",
+            )
+            importlib.import_module("aiocoap.transports.tinydtls")
+
+
+def _resolve_aiocoap_client_transport_env() -> str | None:
+    """Resolve aiocoap client transports as an env-var value."""
+    with contextlib.suppress(Exception):
+        from aiocoap import defaults
+
+        defaults_any = cast(Any, defaults)
+        raw_transports = defaults_any.get_default_clienttransports(use_env=True)
+        transports = tuple(str(transport) for transport in raw_transports)
+        if transports:
+            return ":".join(transports)
+    return None
+
+
+def _prepare_aiocoap_transports_worker(existing_env: str | None) -> str | None:
+    """Resolve and preload aiocoap client transports in a worker thread."""
+    if existing_env is None:
+        resolved = _resolve_aiocoap_client_transport_env()
+        effective = resolved
+    else:
+        resolved = None
+        effective = existing_env
+
+    _preload_aiocoap_client_transports(effective)
+    return resolved
+
+
+async def _async_prepare_aiocoap_client_transport_env() -> None:
+    """Prepare aiocoap transport defaults outside the event loop."""
+    global _aiocoap_transport_env_ready
+
+    if _aiocoap_transport_env_ready:
+        return
+
+    async with _aiocoap_transport_env_lock:
+        if _aiocoap_transport_env_ready:
+            return
+
+        existing_env = os.environ.get(_AIOCOAP_CLIENT_TRANSPORT_ENV)
+        resolved = await asyncio.to_thread(_prepare_aiocoap_transports_worker, existing_env)
+        if existing_env is None and resolved:
+            os.environ[_AIOCOAP_CLIENT_TRANSPORT_ENV] = resolved
+
+        _aiocoap_transport_env_ready = True
 
 
 async def async_create_client(
@@ -24,6 +105,7 @@ async def async_create_client(
     create_client: Any | None = None,
 ) -> CoAPClient:
     """Create a CoAP client for a host with timeout protection."""
+    await _async_prepare_aiocoap_client_transport_env()
     creator = create_client or CoAPClient.create
     return await asyncio.wait_for(creator(host), timeout=timeout)
 
@@ -60,6 +142,7 @@ async def async_fetch_device_info(
     ``sys/dev/status`` read, so this identifies a device whose status cannot be
     read directly.
     """
+    await _async_prepare_aiocoap_client_transport_env()
     creator = create_client or CoAPClient.create
     client = await asyncio.wait_for(creator(host, sync=False), timeout=timeout)
     try:

@@ -14,11 +14,11 @@ from homeassistant.components.sensor import (
 from homeassistant.const import (
     ATTR_DEVICE_CLASS,
     ATTR_TEMPERATURE,
-    CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
     CONF_ENTITY_CATEGORY,
     PERCENTAGE,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
     EntityCategory,
+    UnitOfDensity,
     UnitOfTemperature,
     UnitOfTime,
 )
@@ -52,6 +52,14 @@ CONF_STATUS = "status"
 # re-discover the device and update its IP after a DHCP lease change. See issue #8.
 CONF_MAC = "mac"
 CONF_UPDATE_WATCHDOG = "update_watchdog"
+CONF_MISSED_PACKAGE_COUNT = "missed_package_count"
+
+# Default watchdog tolerance used when no model- or per-device override is set.
+DEFAULT_MISSED_PACKAGE_COUNT = 3
+# Minimum missed-packet count accepted by the watchdog options form.
+MIN_MISSED_PACKAGE_COUNT = 1
+# Maximum missed-packet count accepted by the watchdog options form.
+MAX_MISSED_PACKAGE_COUNT = 20
 
 # Config-entry option flag set when the user acknowledges the filter
 # replacement repair, so it is not recreated on every coordinator update.
@@ -110,6 +118,7 @@ class FanModel(StrEnum):
     AC3737 = "AC3737"
     AC3829 = "AC3829"
     AC3836 = "AC3836"
+    AC3854_25 = "AC3854/25"
     AC3854_50 = "AC3854/50"
     AC3854_51 = "AC3854/51"
     AC3858_50 = "AC3858/50"
@@ -614,19 +623,19 @@ SENSOR_TYPES: dict[str, SensorDescription] = {
     PhilipsApi.PM25: {
         ATTR_DEVICE_CLASS: SensorDeviceClass.PM25,
         FanAttributes.LABEL: FanAttributes.PM25,
-        FanAttributes.UNIT: CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+        FanAttributes.UNIT: UnitOfDensity.MICROGRAMS_PER_CUBIC_METER,
         ATTR_STATE_CLASS: SensorStateClass.MEASUREMENT,
     },
     PhilipsApi.NEW_PM25: {
         ATTR_DEVICE_CLASS: SensorDeviceClass.PM25,
         FanAttributes.LABEL: FanAttributes.PM25,
-        FanAttributes.UNIT: CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+        FanAttributes.UNIT: UnitOfDensity.MICROGRAMS_PER_CUBIC_METER,
         ATTR_STATE_CLASS: SensorStateClass.MEASUREMENT,
     },
     PhilipsApi.NEW2_PM25: {
         ATTR_DEVICE_CLASS: SensorDeviceClass.PM25,
         FanAttributes.LABEL: FanAttributes.PM25,
-        FanAttributes.UNIT: CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+        FanAttributes.UNIT: UnitOfDensity.MICROGRAMS_PER_CUBIC_METER,
         ATTR_STATE_CLASS: SensorStateClass.MEASUREMENT,
     },
     PhilipsApi.NEW2_GAS: {

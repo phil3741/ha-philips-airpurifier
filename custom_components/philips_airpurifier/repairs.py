@@ -8,9 +8,14 @@ from typing import TYPE_CHECKING, Any
 from philips_airctrl import CoAPClient
 
 from homeassistant.components.repairs import ConfirmRepairFlow, RepairsFlow
+
+try:
+    from homeassistant.components.repairs import RepairsFlowResult
+except ImportError:  # pragma: no cover
+    from homeassistant.data_entry_flow import FlowResult as RepairsFlowResult  # type: ignore[no-redef]
+
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import device_registry as dr, entity_registry as er, issue_registry as ir
 
 from .client import async_fetch_status
@@ -20,6 +25,19 @@ if TYPE_CHECKING:
     from .coordinator import PhilipsAirPurifierCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _entity_registry_identity(entity: Any) -> tuple[str, str, str] | None:
+    """Return the identity Home Assistant uses for an entity registry entry."""
+    if not entity.unique_id:
+        return None
+
+    # Home Assistant scopes unique IDs by entity domain and integration platform.
+    # The fallbacks keep compatibility with the lightweight test doubles used in
+    # this integration's test suite while real RegistryEntry objects provide both.
+    domain = getattr(entity, "domain", entity.entity_id.partition(".")[0])
+    platform = getattr(entity, "platform", DOMAIN)
+    return domain, platform, entity.unique_id
 
 
 async def async_create_fix_flow(
@@ -45,7 +63,7 @@ async def async_create_fix_flow(
 class ConnectivityRepairFlow(RepairsFlow):
     """Handler for connectivity issues."""
 
-    async def async_step_init(self, user_input: dict[str, str] | None = None) -> FlowResult:
+    async def async_step_init(self, user_input: dict[str, str] | None = None) -> RepairsFlowResult:
         """Handle the initial step."""
         if user_input is not None:
             # Attempt to fix connectivity
@@ -62,7 +80,7 @@ class ConnectivityRepairFlow(RepairsFlow):
             },
         )
 
-    async def async_step_fix_connectivity(self) -> FlowResult:  # pragma: no cover
+    async def async_step_fix_connectivity(self) -> RepairsFlowResult:  # pragma: no cover
         """Attempt to fix connectivity issues."""
         try:
             # Get the config entry for this repair
@@ -110,7 +128,7 @@ class ConnectivityRepairFlow(RepairsFlow):
 class EntityRegistryCleanupFlow(RepairsFlow):
     """Handler for entity registry cleanup."""
 
-    async def async_step_init(self, user_input: dict[str, str] | None = None) -> FlowResult:
+    async def async_step_init(self, user_input: dict[str, str] | None = None) -> RepairsFlowResult:
         """Handle the initial step."""
         if user_input is not None:
             return await self.async_step_cleanup_entities()
@@ -126,7 +144,7 @@ class EntityRegistryCleanupFlow(RepairsFlow):
             },
         )
 
-    async def async_step_cleanup_entities(self) -> FlowResult:  # pragma: no cover
+    async def async_step_cleanup_entities(self) -> RepairsFlowResult:  # pragma: no cover
         """Clean up entity registry."""
         try:
             entity_registry = er.async_get(self.hass)
@@ -153,12 +171,14 @@ class EntityRegistryCleanupFlow(RepairsFlow):
                             removed_entity_ids.add(entity.entity_id)
                             continue
 
-                    # Check for duplicate entities (same unique_id)
-                    if entity.unique_id:
+                    # Check for duplicate entities using Home Assistant's registry
+                    # identity: entity domain + integration platform + unique ID.
+                    identity = _entity_registry_identity(entity)
+                    if identity is not None:
                         duplicates = [
                             e
                             for e in entities
-                            if e.unique_id == entity.unique_id
+                            if _entity_registry_identity(e) == identity
                             and e.entity_id != entity.entity_id
                             and e.entity_id not in removed_entity_ids
                         ]
@@ -169,6 +189,7 @@ class EntityRegistryCleanupFlow(RepairsFlow):
                                 cleaned_entities.append(duplicate.entity_id)
                                 removed_entity_ids.add(duplicate.entity_id)
 
+            async_delete_issue(self.hass, "entity_registry_cleanup")
             return self.async_create_entry(
                 title="Entity Cleanup Complete",
                 data={
@@ -192,7 +213,7 @@ class FilterReplacementWarningFlow(RepairsFlow):
         """Store the issue data so we can locate the config entry."""
         self._data = data or {}
 
-    async def async_step_init(self, user_input: dict[str, str] | None = None) -> FlowResult:
+    async def async_step_init(self, user_input: dict[str, str] | None = None) -> RepairsFlowResult:
         """Handle the initial step."""
         if user_input is not None:
             return await self.async_step_acknowledge_warning()
@@ -208,7 +229,7 @@ class FilterReplacementWarningFlow(RepairsFlow):
             },
         )
 
-    async def async_step_acknowledge_warning(self) -> FlowResult:
+    async def async_step_acknowledge_warning(self) -> RepairsFlowResult:
         """Acknowledge the filter warning and stop it from reappearing.
 
         The acknowledgment is persisted in the config entry options so the
@@ -232,7 +253,7 @@ class FilterReplacementWarningFlow(RepairsFlow):
 class ConfigurationMigrationFlow(RepairsFlow):
     """Handler for configuration migration issues."""
 
-    async def async_step_init(self, user_input: dict[str, str] | None = None) -> FlowResult:
+    async def async_step_init(self, user_input: dict[str, str] | None = None) -> RepairsFlowResult:
         """Handle the initial step."""
         if user_input is not None:
             return await self.async_step_migrate_config()
@@ -248,7 +269,7 @@ class ConfigurationMigrationFlow(RepairsFlow):
             },
         )
 
-    async def async_step_migrate_config(self) -> FlowResult:  # pragma: no cover
+    async def async_step_migrate_config(self) -> RepairsFlowResult:  # pragma: no cover
         """Migrate configuration."""
         try:
             migrated_entries: list[str] = []
@@ -295,7 +316,7 @@ class ConfigurationMigrationFlow(RepairsFlow):
 class DuplicateEntitiesFlow(RepairsFlow):
     """Handler for duplicate entity issues."""
 
-    async def async_step_init(self, user_input: dict[str, str] | None = None) -> FlowResult:
+    async def async_step_init(self, user_input: dict[str, str] | None = None) -> RepairsFlowResult:
         """Handle the initial step."""
         if user_input is not None:
             return await self.async_step_remove_duplicates()
@@ -311,7 +332,7 @@ class DuplicateEntitiesFlow(RepairsFlow):
             },
         )
 
-    async def async_step_remove_duplicates(self) -> FlowResult:  # pragma: no cover
+    async def async_step_remove_duplicates(self) -> RepairsFlowResult:  # pragma: no cover
         """Remove duplicate entities."""
         try:
             entity_registry = er.async_get(self.hass)
@@ -320,16 +341,15 @@ class DuplicateEntitiesFlow(RepairsFlow):
             for entry in self.hass.config_entries.async_entries(DOMAIN):
                 entities = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
 
-                # Group entities by unique_id
-                unique_id_groups: dict[str, list[Any]] = {}
+                # Group entities by Home Assistant's entity registry identity.
+                identity_groups: dict[tuple[str, str, str], list[Any]] = {}
                 for entity in entities:
-                    if entity.unique_id:
-                        if entity.unique_id not in unique_id_groups:
-                            unique_id_groups[entity.unique_id] = []
-                        unique_id_groups[entity.unique_id].append(entity)
+                    identity = _entity_registry_identity(entity)
+                    if identity is not None:
+                        identity_groups.setdefault(identity, []).append(entity)
 
                 # Remove duplicates
-                for entity_group in unique_id_groups.values():
+                for entity_group in identity_groups.values():
                     if len(entity_group) > 1:
                         # Keep the first entity, remove the rest
                         for entity in entity_group[1:]:
@@ -459,14 +479,16 @@ async def async_check_integration_health(
                 if not device:
                     orphaned_entities.append(entity.entity_id)
 
-        # Check for duplicates
-        unique_ids: dict[str, str] = {}
+        # Check for duplicates using the same identity tuple as Home Assistant.
+        seen_identities: set[tuple[str, str, str]] = set()
         for entity in entities:
-            if entity.unique_id:
-                if entity.unique_id in unique_ids:
-                    duplicate_entities.append(entity.entity_id)
-                else:
-                    unique_ids[entity.unique_id] = entity.entity_id
+            identity = _entity_registry_identity(entity)
+            if identity is None:
+                continue
+            if identity in seen_identities:
+                duplicate_entities.append(entity.entity_id)
+            else:
+                seen_identities.add(identity)
 
     if orphaned_entities or duplicate_entities:
         async_create_issue(

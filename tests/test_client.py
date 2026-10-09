@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
+import os
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
+import warnings
 
 import pytest
 
@@ -139,3 +142,151 @@ async def test_async_fetch_status_with_nudge_observe_error_is_logged() -> None:
         await async_fetch_status_with_nudge("1.2.3.4", [("D03105", 0)])
 
     client.shutdown.assert_awaited()
+
+
+@pytest.fixture(autouse=True)
+def _reset_aiocoap_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset aiocoap transport env readiness and environment variable."""
+    import custom_components.philips_airpurifier.client as client_module
+
+    monkeypatch.setattr(client_module, "_aiocoap_transport_env_ready", False)
+    monkeypatch.delenv("AIOCOAP_CLIENT_TRANSPORT", raising=False)
+
+
+async def test_async_prepare_aiocoap_client_transport_env_preloads_tinydtls_suppressing_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that aiocoap transport preparation preloads tinydtls and suppresses the SyntaxWarning."""
+    import custom_components.philips_airpurifier.client as client_module
+
+    monkeypatch.setattr(
+        client_module,
+        "_resolve_aiocoap_client_transport_env",
+        lambda: "tinydtls:oscore:udp6",
+    )
+
+    def _mock_import(name: str) -> None:
+        if name == "aiocoap.transports.tinydtls":
+            warnings.warn_explicit(
+                "'return' in a 'finally' block",
+                category=SyntaxWarning,
+                filename="tinydtls.py",
+                lineno=228,
+                module="aiocoap.transports.tinydtls",
+            )
+
+    monkeypatch.setattr(client_module.importlib, "import_module", _mock_import)
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        await client_module._async_prepare_aiocoap_client_transport_env()
+
+    assert not any(issubclass(w.category, SyntaxWarning) for w in recorded)
+    assert os.environ.get("AIOCOAP_CLIENT_TRANSPORT") == "tinydtls:oscore:udp6"
+    assert client_module._aiocoap_transport_env_ready is True
+
+
+async def test_async_prepare_aiocoap_client_transport_env_without_tinydtls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that transports without tinydtls do not trigger a preload import."""
+    import custom_components.philips_airpurifier.client as client_module
+
+    monkeypatch.setattr(
+        client_module,
+        "_resolve_aiocoap_client_transport_env",
+        lambda: "oscore:udp6",
+    )
+    imported: list[str] = []
+    monkeypatch.setattr(client_module.importlib, "import_module", imported.append)
+
+    await client_module._async_prepare_aiocoap_client_transport_env()
+
+    assert imported == []
+    assert os.environ.get("AIOCOAP_CLIENT_TRANSPORT") == "oscore:udp6"
+    assert client_module._aiocoap_transport_env_ready is True
+
+
+async def test_async_prepare_aiocoap_client_transport_env_preserves_existing_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that an existing AIOCOAP_CLIENT_TRANSPORT is preserved and preloaded if needed."""
+    import custom_components.philips_airpurifier.client as client_module
+
+    monkeypatch.setenv("AIOCOAP_CLIENT_TRANSPORT", "tinydtls:custom")
+    resolver_called = False
+
+    def _resolver() -> str | None:
+        nonlocal resolver_called
+        resolver_called = True
+        return "different"
+
+    monkeypatch.setattr(client_module, "_resolve_aiocoap_client_transport_env", _resolver)
+    imported: list[str] = []
+    monkeypatch.setattr(client_module.importlib, "import_module", imported.append)
+
+    await client_module._async_prepare_aiocoap_client_transport_env()
+
+    assert not resolver_called
+    assert os.environ.get("AIOCOAP_CLIENT_TRANSPORT") == "tinydtls:custom"
+    assert "aiocoap.transports.tinydtls" in imported
+    assert client_module._aiocoap_transport_env_ready is True
+
+
+async def test_async_prepare_aiocoap_client_transport_env_handles_import_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that import failures during preload do not prevent readiness."""
+    import custom_components.philips_airpurifier.client as client_module
+
+    monkeypatch.setattr(
+        client_module,
+        "_resolve_aiocoap_client_transport_env",
+        lambda: "tinydtls:udp6",
+    )
+
+    def _raising_import(name: str) -> None:
+        raise ImportError("No module named tinydtls")
+
+    monkeypatch.setattr(client_module.importlib, "import_module", _raising_import)
+
+    await client_module._async_prepare_aiocoap_client_transport_env()
+
+    assert os.environ.get("AIOCOAP_CLIENT_TRANSPORT") == "tinydtls:udp6"
+    assert client_module._aiocoap_transport_env_ready is True
+
+
+def test_resolve_aiocoap_client_transport_env_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Return None when default client transports list is empty."""
+    from types import SimpleNamespace
+
+    import custom_components.philips_airpurifier.client as client_module
+
+    dummy_defaults = SimpleNamespace(get_default_clienttransports=lambda **kw: [])
+    monkeypatch.setattr("aiocoap.defaults", dummy_defaults, raising=False)
+    with patch.dict("sys.modules", {"aiocoap.defaults": dummy_defaults}):
+        assert client_module._resolve_aiocoap_client_transport_env() is None
+
+
+async def test_async_prepare_aiocoap_client_transport_env_concurrent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent preparation calls safely hit the double-check lock."""
+    import custom_components.philips_airpurifier.client as client_module
+
+    original_worker = client_module._prepare_aiocoap_transports_worker
+
+    def _slow_worker(env: str | None) -> str | None:
+        import time
+
+        time.sleep(0.01)
+        return original_worker(env)
+
+    monkeypatch.setattr(client_module, "_prepare_aiocoap_transports_worker", _slow_worker)
+    monkeypatch.setattr(client_module, "_resolve_aiocoap_client_transport_env", lambda: "oscore:udp6")
+
+    await asyncio.gather(
+        client_module._async_prepare_aiocoap_client_transport_env(),
+        client_module._async_prepare_aiocoap_client_transport_env(),
+    )
+    assert client_module._aiocoap_transport_env_ready is True

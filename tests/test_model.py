@@ -109,3 +109,12 @@ def test_amf870_rotation_controls() -> None:
     assert PhilipsApi.NEW2_OSCILLATION in config.numbers
     assert PhilipsApi.NEW2_TARGET_TEMP in config.numbers
     assert config.oscillation == {PhilipsApi.NEW2_OSCILLATION: PhilipsApi.OSCILLATION_MAP5}
+
+
+def test_ac3854_25_registered() -> None:
+    """Test AC3854/25 is registered with GEN1, child lock, and /50 presets."""
+    config = DEVICE_MODELS[FanModel.AC3854_25]
+    assert config.api_generation is ApiGeneration.GEN1
+    assert PhilipsApi.CHILD_LOCK in config.switches
+    assert "allergy_sleep" not in config.preset_modes
+    assert "auto" in config.preset_modes
